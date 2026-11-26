@@ -1,0 +1,148 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:">
+  <title>grab</title>
+  <link rel="stylesheet" href="glass.css">
+  <link rel="stylesheet" href="vendor/katex.min.css">
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="side">
+      <div class="side-top drag">
+        <div class="brand">
+          <svg class="brand-mark" viewBox="0 0 24 24"><defs><linearGradient id="gb" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f3e8ff"/><stop offset=".5" stop-color="#a855f7"/><stop offset="1" stop-color="#6d28d9"/></linearGradient></defs><circle cx="12" cy="12" r="8.5" fill="none" stroke="url(#gb)" stroke-width="2.4" stroke-linecap="round" stroke-dasharray="44 9.4" transform="rotate(-50 12 12)"/><circle cx="12" cy="12" r="3" fill="url(#gb)"/></svg>
+          <span class="brand-word">grab</span>
+        </div>
+      </div>
+      <nav class="nav" id="nav">
+        <button data-tab="home"><svg viewBox="0 0 24 24"><path d="M4 11l8-6 8 6v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/></svg>Home</button>
+        <button data-tab="history"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>History<span class="count" id="navCount"></span></button>
+        <button data-tab="settings"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Settings</button>
+      </nav>
+      <div class="side-foot">
+        <div class="conn" id="sideConn"><span class="dot"></span><span class="txt">Checking connection</span></div>
+        <button class="grab-btn btn-accent" id="grabNow">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5" stroke-dasharray="40 7.5" transform="rotate(-50 12 12)"/><circle cx="12" cy="12" r="2.4" class="fill"/></svg>
+          Grab now <kbd id="sideKey">Ctrl Q</kbd>
+        </button>
+      </div>
+    </aside>
+
+    <section class="main">
+      <header class="titlebar drag">
+        <h1 id="pageTitle">Home</h1>
+        <div class="win-btns nodrag">
+          <button id="minBtn" title="Minimize"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
+          <button id="closeBtn" title="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+        </div>
+      </header>
+
+      <div class="page" id="page-home">
+        <div class="hero">
+          <div class="hero-text">
+            <div class="hero-word">grab</div>
+            <p>Select anything on your screen and ask Claude about it. Click an object, circle it, or drag a box.</p>
+            <div class="hero-keys"><kbd id="heroKey1">Ctrl</kbd><span>+</span><kbd id="heroKey2">Q</kbd><span class="muted">from any app</span></div>
+          </div>
+          <div class="hero-art" aria-hidden="true">
+            <div class="orb"></div>
+            <svg viewBox="0 0 200 200"><defs><linearGradient id="gh" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f3e8ff"/><stop offset=".5" stop-color="#a855f7"/><stop offset="1" stop-color="#6d28d9"/></linearGradient></defs><circle cx="100" cy="100" r="64" fill="none" stroke="url(#gh)" stroke-width="10" stroke-linecap="round" stroke-dasharray="340 62" transform="rotate(-50 100 100)"/><circle cx="100" cy="100" r="20" fill="url(#gh)"/></svg>
+          </div>
+        </div>
+
+        <div class="tiles">
+          <div class="tile"><span class="lbl">Today</span><b id="stToday">0</b><span class="sub">grabs</span></div>
+          <div class="tile"><span class="lbl">Last 7 days</span><b id="stWeek">0</b><span class="sub">grabs</span></div>
+          <div class="tile"><span class="lbl">All time</span><b id="stTotal">0</b><span class="sub" id="stFollow">0 follow-ups</span></div>
+          <div class="tile"><span class="lbl">Time to first words</span><b id="stFirst">–</b><span class="sub">median</span></div>
+        </div>
+
+        <div class="row2">
+          <div class="card chart-card">
+            <div class="card-head"><h2>Grabs per day</h2><span class="muted" id="chartRange">Last 7 days</span></div>
+            <div class="chart" id="chart"></div>
+            <div class="tip" id="tip" hidden></div>
+          </div>
+          <div class="card split-card">
+            <div class="card-head"><h2>Models used</h2></div>
+            <div class="split-row"><span>Fast</span><span class="muted">Haiku</span><b id="stFast">0</b></div>
+            <div class="split-row"><span>Smart</span><span class="muted">Sonnet</span><b id="stSmart">0</b></div>
+            <div class="card-head small"><h2>Connection</h2></div>
+            <div class="conn big" id="homeConn"><span class="dot"></span><span class="txt">Checking</span></div>
+          </div>
+        </div>
+
+        <div class="card-head"><h2>Recent</h2><button class="link" data-goto="history">See all</button></div>
+        <div class="recent" id="recent"></div>
+      </div>
+
+      <div class="page" id="page-history" hidden>
+        <div class="toolbar">
+          <div class="search">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>
+            <input id="q" type="text" placeholder="Search questions and answers" spellcheck="false">
+          </div>
+          <div class="seg" id="filter">
+            <button data-f="all" class="active">All</button>
+            <button data-f="fav">Starred</button>
+            <button data-f="fast">Fast</button>
+            <button data-f="smart">Smart</button>
+          </div>
+          <button class="btn ghost danger" id="clearAll">Clear all</button>
+        </div>
+        <div class="hist">
+          <div class="hist-list" id="histList"></div>
+          <div class="hist-detail" id="histDetail">
+            <div class="empty-detail">Pick a grab to see it here.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="page" id="page-settings" hidden>
+        <div class="settings">
+          <section class="card group">
+            <div class="g-head"><h2>Connect to Claude</h2>
+              <div class="seg" id="backend"><button data-backend="claude">Claude account</button><button data-backend="api">API key</button></div>
+            </div>
+            <div class="conn-row" id="connRow">
+              <div class="conn big" id="setConn"><span class="dot"></span><span class="txt">Checking</span></div>
+              <button class="btn" id="signin">Sign in</button>
+            </div>
+            <div id="keyRow" hidden>
+              <div class="row"><input id="key" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false"><button class="btn" id="test">Test</button><button class="btn ghost" id="getkey">Get a key</button></div>
+            </div>
+            <p class="note" id="connNote"></p>
+          </section>
+
+          <section class="card group">
+            <div class="g-head"><h2>Shortcut</h2></div>
+            <div class="row"><button class="recorder" id="shortcut"></button><button class="btn ghost" id="resetkey">Reset to Ctrl Q</button></div>
+            <p class="note">Click the box and press a new combination. Esc cancels.</p>
+          </section>
+
+          <section class="card group">
+            <div class="opt"><div><h3>Default model</h3><p class="note">Fast is Haiku. Smart is Sonnet.</p></div>
+              <div class="seg" id="model"><button data-model="fast">Fast</button><button data-model="smart">Smart</button></div></div>
+            <div class="opt"><div><h3>Click to select objects</h3><p class="note">Hover highlights buttons, panels and windows; click selects them.</p></div>
+              <button class="switch" id="objects"><span></span></button></div>
+            <div class="opt"><div><h3>Keep history</h3><p class="note">Saves each grab on this computer only, for the dashboard.</p></div>
+              <button class="switch" id="history"><span></span></button></div>
+            <div class="opt"><div><h3>Launch at login</h3><p class="note">grab waits in the tray, ready for the shortcut.</p></div>
+              <button class="switch" id="login"><span></span></button></div>
+            <div class="opt"><div><h3>Answer window opacity</h3><p class="note">Lower it to see through the frosted glass.</p></div>
+              <label class="range"><input id="opacity" type="range" min="40" max="100" step="1"><b id="opval"></b></label></div>
+          </section>
+
+          <div class="save-row"><span class="status" id="status"></span><button class="btn btn-accent wide" id="saveBtn">Save changes</button></div>
+        </div>
+      </div>
+    </section>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script src="vendor/vendor.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>
