@@ -27,7 +27,13 @@ npm install
 npm start
 ```
 
-The first launch opens Settings. Paste your Claude API key from console.anthropic.com. It's encrypted with the OS keychain (Electron `safeStorage`) and never written in plain text. Grab then sits in the system tray and starts with Windows. You can turn that off in Settings or from the tray menu.
+Grab sits in the system tray and starts with Windows. You can turn that off in Settings or from the tray menu.
+
+### Connecting to Claude
+
+By default Grab uses your Claude account (Pro or Max) through Claude Code, so you don't need an API key. It looks for Claude Code on your PATH, in `~/.local/bin`, and in the copy that comes with the Claude desktop app. If you aren't signed in, Settings shows a **Sign in** button that opens `claude auth login`. Grab runs Claude Code with every tool, plugin and MCP server turned off, so it can only read the image you send and reply in text.
+
+If you'd rather pay per request, switch Settings to **API key** and paste a key from console.anthropic.com. The key is encrypted with the OS keychain (Electron `safeStorage`) and never written in plain text.
 
 If `npm install` can't download Electron because of the native unzip helper, unzip `%LOCALAPPDATA%\electron\Cache\...\electron-v45.5.0-win32-x64.zip` into `node_modules\electron\dist` and put `electron.exe` in `node_modules\electron\path.txt`.
 
@@ -41,7 +47,8 @@ This makes a one-click NSIS installer in `dist/`. On a PC with Smart App Control
 
 ## How it works
 
-- `src/main.js`: tray, global shortcut, screen capture (`desktopCapturer`), and the Claude streaming call (`@anthropic-ai/sdk`). The overlay windows (one per monitor) and the answer window are created once at startup and only shown or hidden after that.
+- `src/main.js`: tray, global shortcut, screen capture (`desktopCapturer`), and the Claude call, either through Claude Code or straight to the API (`@anthropic-ai/sdk`).
+- `src/claude-code.js`: finds Claude Code and keeps one `claude -p` process per grab, streaming JSON in and out, so follow-ups continue the same conversation. The overlay windows (one per monitor) and the answer window are created once at startup and only shown or hidden after that.
 - `src/renderer/overlay.*`: the frozen, dimmed screenshot; freehand and box selection; the ask bar. The crop is cut from the full-resolution capture and scaled down so the long edge is at most 1,500 px.
 - `src/renderer/answer.*`: the streamed answer, rendered with marked, KaTeX and highlight.js. The frosted background is a blurred copy of the screen behind the window, so the glass look holds whether or not the window has focus.
 - `src/renderer/settings.*`: API key, shortcut recorder, default model, launch at login.
