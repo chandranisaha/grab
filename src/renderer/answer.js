@@ -89,9 +89,10 @@ function paint(turn, { cursor = false } = {}) {
     box.className = 'err';
     box.innerHTML = `<span>${esc(turn.error.message)}</span>`;
     const btn = document.createElement('button');
-    btn.textContent = turn.error.needsKey ? 'Open settings' : 'Retry';
+    btn.textContent = turn.error.needsKey ? 'Open settings' : turn.error.needsLogin ? 'Sign in' : 'Retry';
     btn.addEventListener('click', () => {
       if (turn.error.needsKey) window.grab.send('settings:open');
+      else if (turn.error.needsLogin) { window.grab.send('claude:login'); btn.textContent = 'Retry'; turn.error.needsLogin = false; }
       else retry(turn);
     });
     box.appendChild(btn);

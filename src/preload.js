@@ -4,7 +4,7 @@ const SEND = new Set([
   'overlay:cancel', 'overlay:submit', 'overlay:selecting', 'overlay:ready',
   'answer:followup', 'answer:retry', 'answer:stop', 'answer:close', 'answer:pin', 'answer:opacity',
   'answer:idle', 'answer:active', 'answer:focus', 'clipboard:write',
-  'settings:open', 'settings:close', 'open:console',
+  'settings:open', 'settings:close', 'open:console', 'claude:login',
 ]);
 const INVOKE = new Set(['answer:save', 'settings:get', 'settings:save', 'settings:test-key']);
 const ON = new Set([

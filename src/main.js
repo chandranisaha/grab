@@ -5,6 +5,7 @@ const {
 const path = require('path');
 const fs = require('fs');
 const Anthropic = require('@anthropic-ai/sdk');
+const { findClaude, ClaudeCodeSession, openLogin, authStatus } = require('./claude-code');
 
 const MODELS = { fast: 'claude-haiku-5-5', smart: 'claude-sonnet-5-5' };
 const DEFAULT_SHORTCUT = 'Control+Q';
@@ -33,8 +34,11 @@ const captures = new Map();
 
 function loadConfig() {
   try { config = JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch { config = {}; }
-  config = { shortcut: DEFAULT_SHORTCUT, model: 'fast', openAtLogin: true, opacity: 1, ...config };
+  config = { shortcut: DEFAULT_SHORTCUT, model: 'fast', openAtLogin: true, opacity: 1, backend: 'claude', ...config };
 }
+
+const claudeBin = () => findClaude(config.claudePath);
+const needsLogin = (msg) => /authenticat|log ?in|oauth|not logged|credential|401|unauthori/i.test(msg || '');
 
 function saveConfig() {
   fs.mkdirSync(path.dirname(configPath()), { recursive: true });
@@ -247,12 +251,68 @@ function setAnswerOpacity(target) {
 
 function closeAnswer() {
   if (activeStream) { try { activeStream.abort(); } catch { /* already done */ } activeStream = null; }
+  session?.cc?.stop();
   session = null;
   captures.clear();
   if (answerWin && !answerWin.isDestroyed()) { answerWin.webContents.send('answer:reset'); answerWin.hide(); }
 }
 
+function runClaudeCode() {
+  const send = (ch, data) => { if (answerWin && !answerWin.isDestroyed()) answerWin.webContents.send(ch, data); };
+  const bin = claudeBin();
+  if (!bin) {
+    send('answer:error', { message: 'Claude Code was not found on this computer. Install the Claude desktop app or Claude Code, or switch to an API key in Settings.', needsKey: true });
+    return;
+  }
+  if (!session.cc || session.cc.model !== (MODELS[session.model] || MODELS.fast)) {
+    session.cc?.stop();
+    session.cc = new ClaudeCodeSession({
+      bin, model: MODELS[session.model] || MODELS.fast, system: SYSTEM_PROMPT,
+      cwd: path.join(app.getPath('userData'), 'claude-work'),
+    });
+  }
+  const cc = session.cc;
+  const msgs = session.messages;
+  const last = msgs[msgs.length - 1];
+  let content = last.content;
+  if (!cc.alive() && msgs.length > 1) {
+    const history = msgs.slice(0, -1).map((m, i) => {
+      const text = typeof m.content === 'string' ? m.content : m.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+      return `${m.role === 'user' ? (i === 0 ? 'Question' : 'Follow-up') : 'Your answer'}: ${text}`;
+    }).join('\n\n');
+    content = [msgs[0].content[0], { type: 'text', text: `Earlier in this conversation about the image:\n\n${history}\n\nNew follow-up: ${typeof last.content === 'string' ? last.content : last.content[1].text}` }];
+  }
+  const turnId = Date.now();
+  session.turnId = turnId;
+  let text = '';
+  const mine = () => session && session.turnId === turnId;
+  activeStream = { abort: () => cc.stop() };
+  send('answer:start', { turnId });
+  cc.ask(content, {
+    text: (delta) => { if (!mine()) return; text += delta; send('answer:delta', { turnId, delta }); },
+    done: () => {
+      if (!mine()) return;
+      activeStream = null;
+      msgs.push({ role: 'assistant', content: text });
+      send('answer:done', { turnId });
+    },
+    error: (message) => {
+      if (!mine()) return;
+      activeStream = null;
+      if (needsLogin(message)) send('answer:error', { message: 'Sign in to your Claude account to get answers. A window will open to sign in; then press Retry.', needsLogin: true });
+      else send('answer:error', { message: String(message).split('\n')[0].slice(0, 220) });
+    },
+    aborted: () => {
+      if (!mine()) return;
+      activeStream = null;
+      if (text) { msgs.push({ role: 'assistant', content: text }); send('answer:done', { turnId }); }
+      else send('answer:error', { message: 'Stopped.' });
+    },
+  });
+}
+
 async function runTurn() {
+  if (config.backend !== 'api') return runClaudeCode();
   const key = getApiKey();
   const send = (ch, data) => { if (answerWin && !answerWin.isDestroyed()) answerWin.webContents.send(ch, data); };
   if (!key) {
@@ -306,7 +366,7 @@ function friendlyError(err) {
 function openSettings() {
   if (settingsWin && !settingsWin.isDestroyed()) { settingsWin.show(); settingsWin.focus(); return; }
   const opts = {
-    width: 480, height: 560, resizable: false, maximizable: false, minimizable: false, frame: false, show: false,
+    width: 480, height: 690, resizable: false, maximizable: false, minimizable: false, frame: false, show: false,
     alwaysOnTop: true, webPreferences: { preload },
   };
   if (nativeGlass) Object.assign(opts, { vibrancy: 'hud', transparent: true });
@@ -331,6 +391,7 @@ function registerIpc() {
     const { image, question, model, rect, displayId } = payload;
     hideOverlays();
     if (activeStream) { try { activeStream.abort(); } catch { /* ignore */ } activeStream = null; }
+    session?.cc?.stop();
     config.model = model; saveConfig();
     const base64 = image.split(',')[1];
     session = {
@@ -407,20 +468,30 @@ function registerIpc() {
     return { ok: true, path: res.filePath };
   });
 
-  ipcMain.handle('settings:get', () => ({
-    hasKey: !!getApiKey(),
-    keyFromEnv: !config.apiKeyEnc && !!process.env.ANTHROPIC_API_KEY,
-    shortcut: config.shortcut,
-    model: config.model,
-    openAtLogin: !!config.openAtLogin,
-    platform: process.platform,
-  }));
+  ipcMain.handle('settings:get', () => {
+    const bin = claudeBin();
+    const auth = bin ? authStatus(bin) : { loggedIn: false };
+    return {
+      backend: config.backend,
+      claudeFound: !!bin,
+      claudeLoggedIn: auth.loggedIn,
+      hasKey: !!getApiKey(),
+      keyFromEnv: !config.apiKeyEnc && !!process.env.ANTHROPIC_API_KEY,
+      shortcut: config.shortcut,
+      model: config.model,
+      openAtLogin: !!config.openAtLogin,
+      platform: process.platform,
+    };
+  });
+
+  ipcMain.on('claude:login', () => { const bin = claudeBin(); if (bin) openLogin(bin); });
 
   ipcMain.handle('settings:save', (_e, s) => {
     try {
       if (typeof s.apiKey === 'string' && s.apiKey.trim()) setApiKey(s.apiKey.trim());
       if (s.clearKey) setApiKey('');
       if (s.model) config.model = s.model;
+      if (s.backend === 'api' || s.backend === 'claude') config.backend = s.backend;
       if (typeof s.openAtLogin === 'boolean') config.openAtLogin = s.openAtLogin;
       const prev = config.shortcut;
       if (s.shortcut) config.shortcut = s.shortcut;
@@ -469,7 +540,9 @@ app.whenReady().then(() => {
   nativeTheme.on('updated', () => {
     if (!nativeGlass) for (const w of [answerWin, settingsWin]) if (w && !w.isDestroyed()) w.setBackgroundColor(panelColor());
   });
-  if (!getApiKey()) openSettings();
+  const bin = claudeBin();
+  const ready = config.backend === 'api' ? !!getApiKey() : !!bin && authStatus(bin).loggedIn;
+  if (!ready) openSettings();
   if (process.argv.includes('--grab-now')) setTimeout(startGrab, 800);
 });
 
