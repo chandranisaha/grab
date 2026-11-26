@@ -1,0 +1,58 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:">
+  <link rel="stylesheet" href="glass.css">
+  <link rel="stylesheet" href="vendor/katex.min.css">
+  <link rel="stylesheet" href="answer.css">
+</head>
+<body>
+  <div class="backdrop" id="backdrop"></div>
+  <div class="shell" id="shell">
+    <header class="bar">
+      <img id="thumb" class="thumb" alt="">
+      <div class="title">
+        <span class="name">Grab</span>
+        <span class="badge" id="badge">Fast</span>
+      </div>
+      <div class="actions">
+        <label class="opacity" title="Window opacity">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4v16" /><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/></svg>
+          <input id="opacity" type="range" min="40" max="100" step="1" value="85">
+        </label>
+        <button class="icon-btn" id="pin" title="Pin (Ctrl+P)">
+          <svg viewBox="0 0 24 24"><path d="M9 4h6l-1 6 4 4H6l4-4z"/><path d="M12 14v6"/></svg>
+        </button>
+        <button class="icon-btn" id="copy" title="Copy answer (Ctrl+C)">
+          <svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+        </button>
+        <button class="icon-btn" id="save" title="Save as note">
+          <svg viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/></svg>
+        </button>
+        <button class="icon-btn" id="close" title="Close (Esc)">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main id="scroll" class="scroll">
+      <div id="log" class="log"></div>
+    </main>
+
+    <footer class="foot">
+      <div class="field">
+        <input id="follow" type="text" placeholder="Ask a follow-up..." autocomplete="off" spellcheck="false">
+        <button id="go" class="go" title="Send (Enter)">
+          <svg class="up" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+          <svg class="stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
+        </button>
+      </div>
+    </footer>
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script src="vendor/vendor.js"></script>
+  <script src="answer.js"></script>
+</body>
+</html>
