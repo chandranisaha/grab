@@ -1,4 +1,4 @@
-const path = require('path');
+﻿const path = require('path');
 const fs = require('fs');
 const esbuild = require('esbuild');
 
@@ -60,9 +60,9 @@ function appIcon(x, y, S = 512) {
   const inside = clamp(r - Math.hypot(dx, dy) + 0.5);
   if (inside <= 0) return [0, 0, 0, 0];
   const t = (x + y) / (2 * S);
-  let R = 58 + (10 - 58) * t;
-  let G = 155 + (100 - 155) * t;
-  let B = 255 + (216 - 255) * t;
+  let R = 192 + (109 - 192) * t;
+  let G = 132 + (40 - 132) * t;
+  let B = 252 + (217 - 252) * t;
   const c = S / 2;
   const d = Math.hypot(x - c, y - c);
   const ring = clamp(1 - Math.abs(d - S * 0.24) / (S * 0.028));
