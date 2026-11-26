@@ -14,6 +14,37 @@ function setModel(m) {
   for (const b of $('model').children) b.classList.toggle('active', b.dataset.model === m);
 }
 
+let conn = { found: false, loggedIn: false };
+
+function setBackend(b) {
+  state.backend = b;
+  for (const btn of $('backend').children) btn.classList.toggle('active', btn.dataset.backend === b);
+  $('keyGroup').hidden = b !== 'api';
+  $('connRow').hidden = b !== 'claude';
+  $('connNote').textContent = b === 'claude'
+    ? 'Uses your Claude subscription through Claude Code. No API key needed.'
+    : 'Billed per request to your Anthropic Console account.';
+  showConn();
+}
+
+function showConn() {
+  const dot = $('connDot');
+  dot.className = 'conn-dot';
+  if (!conn.found) {
+    dot.classList.add('bad');
+    $('connText').textContent = 'Claude Code not found. Install the Claude desktop app.';
+    $('signin').hidden = true;
+  } else if (conn.loggedIn) {
+    dot.classList.add('ok');
+    $('connText').textContent = 'Connected to your Claude account';
+    $('signin').hidden = true;
+  } else {
+    dot.classList.add('bad');
+    $('connText').textContent = 'Not signed in';
+    $('signin').hidden = false;
+  }
+}
+
 function setLogin(v) {
   state.openAtLogin = v;
   $('login').classList.toggle('on', v);
@@ -67,6 +98,17 @@ window.addEventListener('keydown', (e) => {
   if (acc) { state.shortcut = acc; recording = false; showShortcut(); status('Press Save to apply the new shortcut.'); }
 });
 
+$('backend').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setBackend(b.dataset.backend); });
+$('signin').addEventListener('click', () => {
+  window.grab.send('claude:login');
+  $('connText').textContent = 'Finish signing in in the window that opened...';
+  let tries = 0;
+  const poll = setInterval(async () => {
+    const s = await window.grab.invoke('settings:get');
+    conn = { found: s.claudeFound, loggedIn: s.claudeLoggedIn };
+    if (conn.loggedIn || ++tries > 60) { clearInterval(poll); showConn(); }
+  }, 3000);
+});
 $('resetkey').addEventListener('click', () => { state.shortcut = DEFAULT_SHORTCUT; showShortcut(); status('Press Save to apply.'); });
 $('model').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setModel(b.dataset.model); });
 $('login').addEventListener('click', () => setLogin(!state.openAtLogin));
@@ -89,6 +131,7 @@ $('saveBtn').addEventListener('click', async () => {
     shortcut: state.shortcut,
     model: state.model,
     openAtLogin: state.openAtLogin,
+    backend: state.backend,
   });
   if (res.ok) {
     $('key').value = '';
@@ -102,7 +145,9 @@ $('saveBtn').addEventListener('click', async () => {
 async function load() {
   const s = await window.grab.invoke('settings:get');
   isMac = s.platform === 'darwin';
-  state = { shortcut: s.shortcut, model: s.model, openAtLogin: s.openAtLogin };
+  state = { shortcut: s.shortcut, model: s.model, openAtLogin: s.openAtLogin, backend: s.backend };
+  conn = { found: s.claudeFound, loggedIn: s.claudeLoggedIn };
+  setBackend(s.backend);
   setModel(s.model);
   setLogin(s.openAtLogin);
   showShortcut();
@@ -110,8 +155,9 @@ async function load() {
     $('key').placeholder = s.keyFromEnv ? 'Using ANTHROPIC_API_KEY from environment' : 'Saved in keychain. Paste to replace.';
   } else {
     $('key').placeholder = 'sk-ant-...';
-    status('Paste your API key to start.');
+    if (s.backend === 'api') status('Paste your API key to start.');
   }
+  if (s.backend === 'claude' && !s.claudeLoggedIn) status('Sign in to your Claude account to start.');
 }
 
 load();

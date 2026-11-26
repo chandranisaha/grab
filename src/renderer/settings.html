@@ -22,6 +22,22 @@
     <main>
       <section class="group">
         <div class="label-row">
+          <label>Connect to Claude</label>
+          <div class="seg" id="backend">
+            <button data-backend="claude">Claude account</button>
+            <button data-backend="api">API key</button>
+          </div>
+        </div>
+        <div class="row conn" id="connRow">
+          <span class="conn-dot" id="connDot"></span>
+          <span class="conn-text" id="connText">Checking...</span>
+          <button class="btn" id="signin">Sign in</button>
+        </div>
+        <p class="note" id="connNote">Uses your Claude subscription through Claude Code. No API key needed.</p>
+      </section>
+
+      <section class="group" id="keyGroup">
+        <div class="label-row">
           <label for="key">Claude API key</label>
           <a href="#" id="getkey">Get a key</a>
         </div>
