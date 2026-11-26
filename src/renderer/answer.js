@@ -3,32 +3,28 @@ const { marked, katex, hljs } = window.Vendor;
 const params = new URLSearchParams(location.search);
 const frozen = params.get('glass') !== 'native';
 if (frozen) document.body.classList.add('frozen');
-const backdropEl = document.getElementById('backdrop');
-let backdrop = null;
-
-function placeBackdrop(win) {
-  if (!frozen) return;
-  const ok = !!(backdrop && win);
-  document.body.classList.toggle('no-backdrop', !ok);
-  if (!ok) { backdropEl.style.backgroundImage = 'none'; return; }
-  const pad = 80;
-  backdropEl.style.backgroundSize = `${backdrop.bounds.width}px ${backdrop.bounds.height}px`;
-  backdropEl.style.backgroundPosition = `${backdrop.bounds.x - win.x + pad}px ${backdrop.bounds.y - win.y + pad}px`;
-}
 
 const $ = (id) => document.getElementById(id);
+const backdropEl = $('backdrop');
 const log = $('log');
 const scroller = $('scroll');
 const follow = $('follow');
 const go = $('go');
 const pinBtn = $('pin');
+const briefBtn = $('brief');
+const menu = $('menu');
 const opacity = $('opacity');
 const toastEl = $('toast');
+const modelEl = $('model');
+const BRIEF_LABEL = 'Summary in 1-2 lines';
 
+let backdrop = null;
 let turns = [];
 let current = null;
 let busy = false;
 let pinned = false;
+let model = 'fast';
+let image = null;
 let renderQueued = false;
 let idleTimer = null;
 let faded = false;
@@ -45,9 +41,7 @@ marked.use({
       const language = (lang || '').trim().split(/\s+/)[0].toLowerCase();
       let body;
       try {
-        body = language && hljs.getLanguage(language)
-          ? hljs.highlight(text, { language, ignoreIllegals: true }).value
-          : esc(text);
+        body = language && hljs.getLanguage(language) ? hljs.highlight(text, { language, ignoreIllegals: true }).value : esc(text);
       } catch { body = esc(text); }
       return `<div class="code"><div class="code-head"><span>${esc(language || 'text')}</span><button data-copy>Copy</button></div><pre><code class="hljs">${body}</code></pre></div>`;
     },
@@ -55,9 +49,7 @@ marked.use({
 });
 
 function renderMath(tex, display) {
-  try {
-    return katex.renderToString(tex, { displayMode: display, throwOnError: false, output: 'html', strict: 'ignore' });
-  } catch { return esc(tex); }
+  try { return katex.renderToString(tex, { displayMode: display, throwOnError: false, output: 'html', strict: 'ignore' }); } catch { return esc(tex); }
 }
 
 function renderMarkdown(src) {
@@ -72,19 +64,25 @@ function renderMarkdown(src) {
       .replace(/\\\(([\s\S]+?)\\\)/g, (_, t) => hold(renderMath(t.trim(), false)))
       .replace(/(^|[^\\$\w])\$(?!\s)([^$\n]+?)(?<!\s)\$(?![\w$])/g, (_, pre, t) => pre + hold(renderMath(t, false)));
   }).join('');
-  const html = marked.parse(prepared);
-  return html.replace(/@@GRABMATH(\d+)@@/g, (_, n) => math[Number(n)] || '');
+  return marked.parse(prepared).replace(/@@GRABMATH(\d+)@@/g, (_, n) => math[Number(n)] || '');
 }
 
-function nearBottom() {
-  return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
+function placeBackdrop(win) {
+  if (!frozen) return;
+  const ok = !!(backdrop && win);
+  document.body.classList.toggle('no-backdrop', !ok);
+  if (!ok) { backdropEl.style.backgroundImage = 'none'; return; }
+  const pad = 80;
+  backdropEl.style.backgroundSize = `${backdrop.bounds.width}px ${backdrop.bounds.height}px`;
+  backdropEl.style.backgroundPosition = `${backdrop.bounds.x - win.x + pad}px ${backdrop.bounds.y - win.y + pad}px`;
 }
+
+const nearBottom = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
 
 function paint(turn, { cursor = false } = {}) {
   const stick = nearBottom();
   if (turn.error) {
-    turn.answerEl.innerHTML = '';
-    if (turn.text) turn.answerEl.innerHTML = renderMarkdown(turn.text);
+    turn.answerEl.innerHTML = turn.text ? renderMarkdown(turn.text) : '';
     const box = document.createElement('div');
     box.className = 'err';
     box.innerHTML = `<span>${esc(turn.error.message)}</span>`;
@@ -107,29 +105,32 @@ function paint(turn, { cursor = false } = {}) {
       if (target) target.classList.add('cursor');
     }
   }
+  turn.metaEl.textContent = turn.meta || '';
   if (stick) scroller.scrollTop = scroller.scrollHeight;
 }
 
 function queuePaint() {
   if (renderQueued) return;
   renderQueued = true;
-  requestAnimationFrame(() => {
-    renderQueued = false;
-    if (current) paint(current, { cursor: busy });
-  });
+  requestAnimationFrame(() => { renderQueued = false; if (current) paint(current, { cursor: busy }); });
 }
 
-function addTurn(question) {
+function addTurn(question, { brief = false, withImage = false, text = '', meta = '' } = {}) {
   const el = document.createElement('section');
-  el.className = 'turn';
+  el.className = brief ? 'turn brief' : 'turn';
   const q = document.createElement('div');
   q.className = 'q';
-  q.textContent = question;
+  if (withImage && image) { const im = document.createElement('img'); im.src = image; q.appendChild(im); }
+  const span = document.createElement('span');
+  span.textContent = question;
+  q.appendChild(span);
   const a = document.createElement('div');
   a.className = 'md';
-  el.append(q, a);
+  const m = document.createElement('div');
+  m.className = 'meta';
+  el.append(q, a, m);
   log.appendChild(el);
-  const turn = { question, text: '', error: null, el, answerEl: a };
+  const turn = { question, text, error: null, el, answerEl: a, metaEl: m, meta, brief };
   turns.push(turn);
   current = turn;
   paint(turn);
@@ -141,6 +142,7 @@ function setBusy(v) {
   busy = v;
   go.classList.toggle('busy', v);
   go.title = v ? 'Stop' : 'Send (Enter)';
+  briefBtn.disabled = v || !lastAnswer();
   if (v) wake(); else armIdle();
 }
 
@@ -159,6 +161,12 @@ function sendFollowUp() {
   window.grab.send('answer:followup', q);
 }
 
+function brief() {
+  if (busy || !lastAnswer()) return;
+  addTurn(BRIEF_LABEL, { brief: true });
+  window.grab.send('answer:brief');
+}
+
 function toast(msg) {
   toastEl.textContent = msg;
   toastEl.classList.add('show');
@@ -166,39 +174,43 @@ function toast(msg) {
   toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1400);
 }
 
-function copyText(text, msg = 'Copied') {
-  window.grab.send('clipboard:write', text);
-  toast(msg);
-}
+function copyText(text, msg = 'Copied') { window.grab.send('clipboard:write', text); toast(msg); }
 
 function lastAnswer() {
-  for (let i = turns.length - 1; i >= 0; i--) if (turns[i].text) return turns[i].text;
+  for (let i = turns.length - 1; i >= 0; i--) if (turns[i].text && !turns[i].error) return turns[i].text;
   return '';
 }
 
-function transcript() {
-  return turns.filter((t) => t.text).map((t) => `**Q:** ${t.question}\n\n${t.text}`).join('\n\n---\n\n');
-}
+const transcript = () => turns.filter((t) => t.text).map((t) => `**Q:** ${t.question}\n\n${t.text}`).join('\n\n---\n\n');
 
 function setPinned(v) {
   pinned = v;
   pinBtn.classList.toggle('on', v);
+  document.body.classList.toggle('pinned', v);
   pinBtn.title = v ? 'Unpin (Ctrl+P)' : 'Pin (Ctrl+P)';
   window.grab.send('answer:pin', v);
+  toast(v ? 'Pinned: stays on top, never fades, new grabs open beside it' : 'Unpinned');
   if (v) wake(); else armIdle();
+}
+
+function setModel(m, notify) {
+  model = m === 'smart' ? 'smart' : 'fast';
+  for (const b of modelEl.children) b.classList.toggle('active', b.dataset.model === model);
+  if (notify) { window.grab.send('answer:model', model); toast(model === 'smart' ? 'Next reply uses Smart (Sonnet)' : 'Next reply uses Fast (Haiku)'); }
 }
 
 function setSlider(v) {
   const pct = Math.round(v * 100);
   opacity.value = pct;
   opacity.style.setProperty('--p', `${((pct - 40) / 60) * 100}%`);
+  $('opval').textContent = `${pct}%`;
 }
 
 function armIdle() {
   clearTimeout(idleTimer);
   if (pinned || busy) return;
   idleTimer = setTimeout(() => {
-    if (pinned || busy || document.activeElement === follow && follow.value) return;
+    if (pinned || busy || !menu.hidden || (document.activeElement === follow && follow.value)) return;
     faded = true;
     window.grab.send('answer:idle');
   }, 10000);
@@ -209,40 +221,53 @@ function wake() {
   armIdle();
 }
 
+const toggleMenu = (show = menu.hidden) => { menu.hidden = !show; $('more').classList.toggle('on', show); };
+
+$('brand').addEventListener('click', () => window.grab.send('dashboard:open', 'home'));
 $('close').addEventListener('click', () => window.grab.send('answer:close'));
 pinBtn.addEventListener('click', () => setPinned(!pinned));
+briefBtn.addEventListener('click', brief);
 $('copy').addEventListener('click', () => { const t = lastAnswer(); if (t) copyText(t, 'Answer copied'); });
-$('save').addEventListener('click', async () => {
-  const md = transcript();
-  if (!md) return;
-  const res = await window.grab.invoke('answer:save', md);
-  if (res?.ok) toast('Saved note');
+$('more').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(); });
+modelEl.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && b.dataset.model !== model) setModel(b.dataset.model, true); });
+document.addEventListener('click', (e) => { if (!menu.hidden && !menu.contains(e.target)) toggleMenu(false); });
+
+menu.addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-act]');
+  if (!b) return;
+  toggleMenu(false);
+  const act = b.dataset.act;
+  if (act === 'grab') window.grab.send('answer:grab');
+  if (act === 'dashboard') window.grab.send('dashboard:open', 'home');
+  if (act === 'copyall') { const md = transcript(); if (md) copyText(md, 'Conversation copied'); }
+  if (act === 'save') {
+    const md = transcript();
+    if (!md) return;
+    const res = await window.grab.invoke('answer:save', md);
+    if (res?.ok) toast('Saved note');
+  }
 });
+
 opacity.addEventListener('input', () => {
   const v = Number(opacity.value) / 100;
   setSlider(v);
   window.grab.send('answer:opacity', v);
 });
 go.addEventListener('click', () => (busy ? window.grab.send('answer:stop') : sendFollowUp()));
-follow.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); sendFollowUp(); }
-});
+follow.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); sendFollowUp(); } });
 
 log.addEventListener('click', (e) => {
   const copy = e.target.closest('[data-copy]');
-  if (copy) {
-    const code = copy.closest('.code').querySelector('code').innerText;
-    copyText(code, 'Code copied');
-    return;
-  }
+  if (copy) { copyText(copy.closest('.code').querySelector('code').innerText, 'Code copied'); return; }
   const a = e.target.closest('a[href]');
   if (a) { e.preventDefault(); window.open(a.href); }
 });
 
 window.addEventListener('keydown', (e) => {
   const mod = e.ctrlKey || e.metaKey;
-  if (e.key === 'Escape') { e.preventDefault(); window.grab.send('answer:close'); return; }
+  if (e.key === 'Escape') { e.preventDefault(); if (!menu.hidden) toggleMenu(false); else window.grab.send('answer:close'); return; }
   if (mod && e.key.toLowerCase() === 'p') { e.preventDefault(); setPinned(!pinned); return; }
+  if (mod && e.key.toLowerCase() === 'b') { e.preventDefault(); brief(); return; }
   if (mod && e.key.toLowerCase() === 'c') {
     const selected = String(window.getSelection() || '');
     const inField = document.activeElement === follow && follow.selectionStart !== follow.selectionEnd;
@@ -253,6 +278,8 @@ window.addEventListener('keydown', (e) => {
 ['mousemove', 'mousedown', 'keydown', 'wheel'].forEach((ev) => window.addEventListener(ev, wake, { passive: true }));
 document.addEventListener('mouseenter', wake);
 
+const fmtMs = (ms) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`);
+
 window.grab.on('answer:open', (data) => {
   log.innerHTML = '';
   turns = [];
@@ -260,20 +287,31 @@ window.grab.on('answer:open', (data) => {
   faded = false;
   pinned = false;
   pinBtn.classList.remove('on');
-  $('thumb').src = data.image;
+  document.body.classList.remove('pinned');
+  toggleMenu(false);
+  image = data.image;
+  setModel(data.model, false);
+  setSlider(data.opacity);
   backdrop = data.backdrop;
   backdropEl.style.backgroundImage = backdrop ? `url("${backdrop.image}")` : 'none';
   placeBackdrop(data.bounds);
-  $('badge').textContent = data.model === 'smart' ? 'Smart' : 'Fast';
-  setSlider(data.opacity);
   follow.value = '';
-  addTurn(data.question);
+  if (data.turns?.length) {
+    data.turns.forEach((t, i) => {
+      const turn = addTurn(t.q, { brief: t.q === BRIEF_LABEL, withImage: i === 0, text: t.a, meta: t.firstMs != null ? `${t.model === 'smart' ? 'Smart' : 'Fast'} · first words ${fmtMs(t.firstMs)}` : '' });
+      paint(turn);
+    });
+    setBusy(false);
+  } else {
+    addTurn(data.question, { withImage: true });
+  }
 });
 
 window.grab.on('answer:start', () => {
   if (!current) return;
   current.text = '';
   current.error = null;
+  current.meta = '';
   setBusy(true);
   paint(current);
 });
@@ -284,26 +322,29 @@ window.grab.on('answer:delta', ({ delta }) => {
   queuePaint();
 });
 
-window.grab.on('answer:done', () => {
+window.grab.on('answer:done', ({ firstMs, ms }) => {
+  if (current) {
+    current.meta = `${model === 'smart' ? 'Smart' : 'Fast'} · first words ${fmtMs(firstMs ?? ms)} · done in ${fmtMs(ms)}`;
+    paint(current);
+  }
   setBusy(false);
-  if (current) paint(current);
 });
 
 window.grab.on('answer:error', (err) => {
+  if (current) {
+    if (!(/abort/i.test(err.message) && current.text)) current.error = err;
+    paint(current);
+  }
   setBusy(false);
-  if (!current) return;
-  if (/abort/i.test(err.message) && current.text) { paint(current); return; }
-  current.error = err;
-  paint(current);
 });
 
 window.grab.on('answer:bounds', placeBackdrop);
 
 window.grab.on('answer:reset', () => {
   setBusy(false);
+  clearTimeout(idleTimer);
   backdrop = null;
   backdropEl.style.backgroundImage = 'none';
-  clearTimeout(idleTimer);
   log.innerHTML = '';
   turns = [];
   current = null;
