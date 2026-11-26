@@ -2,14 +2,19 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const SEND = new Set([
   'overlay:cancel', 'overlay:submit', 'overlay:selecting', 'overlay:ready',
-  'answer:followup', 'answer:retry', 'answer:stop', 'answer:close', 'answer:pin', 'answer:opacity',
-  'answer:idle', 'answer:active', 'answer:focus', 'clipboard:write',
-  'settings:open', 'settings:close', 'open:console', 'claude:login',
+  'answer:followup', 'answer:brief', 'answer:retry', 'answer:stop', 'answer:close', 'answer:pin', 'answer:opacity',
+  'answer:idle', 'answer:active', 'answer:model', 'answer:grab', 'clipboard:write',
+  'dashboard:open', 'settings:open', 'claude:login', 'open:console',
+  'dash:reopen', 'dash:grab', 'dash:close', 'dash:minimize',
 ]);
-const INVOKE = new Set(['answer:save', 'settings:get', 'settings:save', 'settings:test-key']);
+const INVOKE = new Set([
+  'overlay:elements', 'answer:save', 'settings:get', 'settings:save', 'settings:test-key',
+  'dash:data', 'dash:entry', 'dash:delete', 'dash:favorite', 'dash:clear',
+]);
 const ON = new Set([
-  'overlay:open', 'overlay:reset', 'overlay:clear-selection',
+  'overlay:open', 'overlay:reset', 'overlay:clear-selection', 'overlay:objects',
   'answer:open', 'answer:start', 'answer:delta', 'answer:done', 'answer:error', 'answer:reset', 'answer:bounds',
+  'dash:tab', 'dash:changed',
 ]);
 
 contextBridge.exposeInMainWorld('grab', {
