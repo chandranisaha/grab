@@ -26,6 +26,7 @@
     "appId": "app.grab.desktop",
     "productName": "Grab",
     "files": ["src/**/*", "!src/vendor-entry.js", "package.json"],
+    "asarUnpack": ["src/native/**"],
     "directories": { "buildResources": "build" },
     "win": { "target": "nsis", "icon": "build/icon.png" },
     "nsis": { "oneClick": true, "perMachine": false, "runAfterFinish": true, "createDesktopShortcut": false, "createStartMenuShortcut": true },
