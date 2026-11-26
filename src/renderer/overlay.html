@@ -8,7 +8,10 @@
 </head>
 <body>
   <canvas id="stage"></canvas>
-  <div id="hint" class="hint glass">Circle or drag to select <span class="dot"></span> Click for the whole screen <span class="dot"></span> <kbd>Esc</kbd> to cancel</div>
+  <div id="hint" class="hint glass">
+    <svg class="hint-mark" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-dasharray="44 9.4" transform="rotate(-50 12 12)"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>
+    Click an object <span class="dot"></span> Circle or drag <span class="dot"></span> <kbd>Ctrl A</kbd> whole screen <span class="dot"></span> <kbd>Esc</kbd> cancel
+  </div>
 
   <div id="ask" class="ask glass" hidden>
     <div class="ask-row">

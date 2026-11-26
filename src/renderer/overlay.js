@@ -1,5 +1,6 @@
 const CHIPS = [
   { label: 'Explain', prompt: 'Explain this.' },
+  { label: 'In 1-2 lines', prompt: 'What is this? Answer in one or two short lines only.' },
   { label: 'Solve', prompt: 'Solve this. Show the key steps, then the final answer.' },
   { label: 'Fix this error', prompt: 'What does this error mean and how do I fix it?' },
   { label: 'Summarize', prompt: 'Summarize this.' },
@@ -7,7 +8,9 @@ const CHIPS = [
   { label: 'Copy text', prompt: 'Transcribe the exact text in this image. Return only the text.' },
 ];
 const MAX_EDGE = 1500;
-const DIM = 'rgba(0, 0, 0, 0.42)';
+const DIM = 'rgba(10, 4, 22, 0.5)';
+const MIN_OBJ_W = 14;
+const MIN_OBJ_H = 10;
 
 const stage = document.getElementById('stage');
 const ctx = stage.getContext('2d');
@@ -28,7 +31,12 @@ let shift = false;
 let activeChip = -1;
 let model = 'fast';
 let hintTimer = null;
-let accent = '#0a84ff';
+let accent = '#a855f7';
+let objWindows = [];
+const elements = new Map();
+let hover = null;
+let pointer = null;
+let pixels = null;
 
 CHIPS.forEach((c, i) => {
   const b = document.createElement('button');
@@ -68,6 +76,121 @@ function resize() {
 }
 
 function scale() { return img ? img.naturalWidth / window.innerWidth : 1; }
+const area = (r) => r.width * r.height;
+const contains = (r, x, y) => x >= r.x && y >= r.y && x < r.x + r.width && y < r.y + r.height;
+
+function clip(r) {
+  const x = Math.max(0, r.x);
+  const y = Math.max(0, r.y);
+  return {
+    x, y,
+    width: Math.max(0, Math.min(window.innerWidth, r.x + r.width) - x),
+    height: Math.max(0, Math.min(window.innerHeight, r.y + r.height) - y),
+  };
+}
+
+// ---------- object detection ----------
+
+function windowAt(x, y) {
+  const hit = objWindows.find((w) => contains(w, x, y) && w.cls !== 'Progman' && w.cls !== 'WorkerW');
+  return hit || null;
+}
+
+function loadElements(w) {
+  if (!w || elements.has(w.hwnd)) return;
+  elements.set(w.hwnd, null);
+  window.grab.invoke('overlay:elements', w.hwnd).then((list) => {
+    elements.set(w.hwnd, Array.isArray(list) ? list : []);
+    if (pointer && !drawing) updateHover(pointer.x, pointer.y);
+  }).catch(() => elements.set(w.hwnd, []));
+}
+
+function labelOf(kind, name) {
+  const k = (kind || '').replace(/([a-z])([A-Z])/g, '$1 $2');
+  const n = (name || '').trim();
+  if (n && k) return `${k} · ${n.length > 40 ? n.slice(0, 39) + '…' : n}`;
+  return n || k || 'Object';
+}
+
+function objectAt(x, y) {
+  const w = windowAt(x, y);
+  if (!w) {
+    return objWindows.length ? { rect: { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, label: 'Whole screen' } : null;
+  }
+  loadElements(w);
+  const winRect = clip(w);
+  const list = elements.get(w.hwnd);
+  let best = null;
+  if (list) {
+    for (const el of list) {
+      if (el.width < MIN_OBJ_W || el.height < MIN_OBJ_H || !contains(el, x, y)) continue;
+      const r = clip(el);
+      if (area(r) >= area(winRect) * 0.98) continue;
+      if (!best || area(r) < area(best.rect)) best = { rect: r, label: labelOf(el.kind, el.name) };
+    }
+  }
+  return best || { rect: winRect, label: labelOf('Window', w.title) };
+}
+
+function grayPixels() {
+  if (pixels || !img) return pixels;
+  const c = document.createElement('canvas');
+  c.width = img.naturalWidth; c.height = img.naturalHeight;
+  const cx = c.getContext('2d', { willReadFrequently: true });
+  cx.drawImage(img, 0, 0);
+  const d = cx.getImageData(0, 0, c.width, c.height).data;
+  const g = new Uint8Array(c.width * c.height);
+  for (let i = 0, j = 0; j < g.length; i += 4, j++) g[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
+  pixels = { g, w: c.width, h: c.height };
+  return pixels;
+}
+
+function edgeBox(cssX, cssY) {
+  const P = grayPixels();
+  if (!P) return null;
+  const s = scale();
+  const { g, w, h } = P;
+  const T = 22;
+  const edge = (x, y) => {
+    if (x <= 0 || y <= 0 || x >= w - 1 || y >= h - 1) return true;
+    const i = y * w + x;
+    return Math.abs(g[i + 1] - g[i - 1]) + Math.abs(g[i + w] - g[i - w]) > T;
+  };
+  const cx = Math.round(cssX * s);
+  const cy = Math.round(cssY * s);
+  let l = cx - 3; let r = cx + 3; let t = cy - 3; let b = cy + 3;
+  const done = { l: false, r: false, t: false, b: false };
+  const col = (x) => { let n = 0; for (let y = t; y <= b; y++) if (edge(x, y)) n++; return n / (b - t + 1); };
+  const row = (y) => { let n = 0; for (let x = l; x <= r; x++) if (edge(x, y)) n++; return n / (r - l + 1); };
+  const big = (len) => len >= 16;
+  for (let iter = 0; iter < 3000 && !(done.l && done.r && done.t && done.b); iter++) {
+    if (!done.l) { if (l <= 1) done.l = true; else if (big(b - t) && col(l - 1) > 0.6) done.l = true; else l -= 2; }
+    if (!done.r) { if (r >= w - 2) done.r = true; else if (big(b - t) && col(r + 1) > 0.6) done.r = true; else r += 2; }
+    if (!done.t) { if (t <= 1) done.t = true; else if (big(r - l) && row(t - 1) > 0.6) done.t = true; else t -= 2; }
+    if (!done.b) { if (b >= h - 2) done.b = true; else if (big(r - l) && row(b + 1) > 0.6) done.b = true; else b += 2; }
+  }
+  const rect = { x: l / s, y: t / s, width: (r - l) / s, height: (b - t) / s };
+  if (rect.width < 24 || rect.height < 18) return null;
+  return rect;
+}
+
+function refine(obj, x, y) {
+  const screenArea = window.innerWidth * window.innerHeight;
+  if (obj && area(obj.rect) < screenArea * 0.3) return obj;
+  const box = edgeBox(x, y);
+  if (box && (!obj || area(box) < area(obj.rect) * 0.8)) return { rect: box, label: 'Detected object' };
+  return obj || { rect: { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, label: 'Whole screen' };
+}
+
+function updateHover(x, y) {
+  const next = objectAt(x, y);
+  const same = hover && next && hover.label === next.label && hover.rect.x === next.rect.x && hover.rect.y === next.rect.y && hover.rect.width === next.rect.width;
+  if (same) return;
+  hover = next;
+  render();
+}
+
+// ---------- drawing helpers ----------
 
 function pathLength(pts) {
   let len = 0;
@@ -90,13 +213,7 @@ function rectFrom(a, b) {
 function bbox(pts) {
   const xs = pts.map((p) => p.x);
   const ys = pts.map((p) => p.y);
-  const x = Math.max(0, Math.min(...xs) - 4);
-  const y = Math.max(0, Math.min(...ys) - 4);
-  return {
-    x, y,
-    width: Math.min(window.innerWidth, Math.max(...xs) + 4) - x,
-    height: Math.min(window.innerHeight, Math.max(...ys) + 4) - y,
-  };
+  return clip({ x: Math.min(...xs) - 4, y: Math.min(...ys) - 4, width: Math.max(...xs) - Math.min(...xs) + 8, height: Math.max(...ys) - Math.min(...ys) + 8 });
 }
 
 function smooth(pts) {
@@ -117,23 +234,21 @@ function strokePath(pts, close) {
   ctx.beginPath();
   ctx.moveTo(pts[0].x, pts[0].y);
   for (let i = 1; i < pts.length - 1; i++) {
-    const mx = (pts[i].x + pts[i + 1].x) / 2;
-    const my = (pts[i].y + pts[i + 1].y) / 2;
-    ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+    ctx.quadraticCurveTo(pts[i].x, pts[i].y, (pts[i].x + pts[i + 1].x) / 2, (pts[i].y + pts[i + 1].y) / 2);
   }
   const last = pts[pts.length - 1];
   ctx.lineTo(last.x, last.y);
   if (close) ctx.closePath();
 }
 
-function glow(fn) {
+function glow(fn, width = 3) {
   ctx.save();
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
   ctx.strokeStyle = accent;
   ctx.shadowColor = accent;
-  ctx.shadowBlur = 14;
-  ctx.lineWidth = 3;
+  ctx.shadowBlur = 16;
+  ctx.lineWidth = width;
   fn();
   ctx.stroke();
   ctx.shadowBlur = 0;
@@ -146,7 +261,7 @@ function glow(fn) {
 
 function roundRect(r, radius) {
   ctx.beginPath();
-  ctx.roundRect(r.x, r.y, r.width, r.height, radius);
+  ctx.roundRect(r.x, r.y, r.width, r.height, Math.min(radius, r.width / 2, r.height / 2));
 }
 
 function bright(r) {
@@ -156,6 +271,28 @@ function bright(r) {
   roundRect(r, 6);
   ctx.clip();
   ctx.drawImage(img, r.x * s, r.y * s, r.width * s, r.height * s, r.x, r.y, r.width, r.height);
+  ctx.restore();
+}
+
+function tag(r, text) {
+  ctx.save();
+  ctx.font = '600 12px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif';
+  const w = Math.ceil(ctx.measureText(text).width) + 18;
+  const h = 22;
+  let x = r.x;
+  let y = r.y - h - 6;
+  if (y < 4) y = r.y + 6;
+  x = Math.min(Math.max(4, x), window.innerWidth - w - 4);
+  ctx.fillStyle = 'rgba(28, 14, 48, 0.92)';
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 7);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#f3e8ff';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, x + 9, y + h / 2 + 0.5);
   ctx.restore();
 }
 
@@ -181,21 +318,36 @@ function render() {
 
   if (sel) {
     bright(sel);
-    if (loop) {
-      ctx.save();
-      ctx.globalAlpha = 0.9;
-      glow(() => strokePath(loop, true));
-      ctx.restore();
-    } else {
-      glow(() => roundRect(sel, 6));
-    }
+    if (loop) glow(() => strokePath(loop, true));
+    else glow(() => roundRect(sel, 6));
     drawHandles(sel);
   }
+
+  if (hover && !sel) {
+    bright(hover.rect);
+    ctx.save();
+    ctx.setLineDash([6, 4]);
+    glow(() => roundRect(hover.rect, 6), 2);
+    ctx.restore();
+    tag(hover.rect, hover.label);
+  } else if (hover && sel && !overAsk()) {
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.setLineDash([5, 5]);
+    glow(() => roundRect(hover.rect, 6), 1.5);
+    ctx.restore();
+  }
+}
+
+function overAsk() {
+  if (ask.hidden || !pointer) return false;
+  const r = ask.getBoundingClientRect();
+  return pointer.x >= r.left && pointer.x <= r.right && pointer.y >= r.top && pointer.y <= r.bottom;
 }
 
 function drawHandles(r) {
   ctx.save();
-  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.92)';
   ctx.lineWidth = 2;
   ctx.lineCap = 'round';
   const l = Math.min(14, r.width / 3, r.height / 3);
@@ -209,6 +361,8 @@ function drawHandles(r) {
   }
   ctx.restore();
 }
+
+// ---------- selection & submit ----------
 
 function cropToDataUrl(r) {
   const s = scale();
@@ -263,18 +417,23 @@ function hideAsk() {
 }
 
 function finishSelection(r, path) {
-  sel = r;
+  sel = clip(r);
   loop = path;
+  hover = null;
   render();
-  drawThumb(r);
+  drawThumb(sel);
   setChip(-1);
-  placeAsk(r);
+  placeAsk(sel);
   input.focus();
 }
 
-function fadeHint() {
-  hint.classList.add('gone');
+function selectWholeScreen() {
+  window.grab.send('overlay:selecting');
+  fadeHint();
+  finishSelection({ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, null);
 }
+
+function fadeHint() { hint.classList.add('gone'); }
 
 function submit() {
   if (!sel || !img) return;
@@ -293,6 +452,7 @@ function submit() {
 
 function reset() {
   img = null; sel = null; loop = null; points = []; drawing = false; info = null;
+  hover = null; pointer = null; pixels = null; objWindows = []; elements.clear();
   hideAsk();
   input.value = '';
   setChip(-1);
@@ -301,27 +461,30 @@ function reset() {
   render();
 }
 
-function cancel() {
-  window.grab.send('overlay:cancel');
-}
+function cancel() { window.grab.send('overlay:cancel'); }
 
 stage.addEventListener('mousedown', (e) => {
   if (e.button === 2) return cancel();
   if (e.button !== 0 || !img) return;
   fadeHint();
-  hideAsk();
-  sel = null; loop = null;
   drawing = true;
   shift = e.shiftKey;
   points = [{ x: e.clientX, y: e.clientY }];
-  window.grab.send('overlay:selecting');
-  render();
 });
 
 window.addEventListener('mousemove', (e) => {
-  if (!drawing) return;
+  pointer = { x: e.clientX, y: e.clientY };
+  if (!drawing) {
+    if (img) updateHover(e.clientX, e.clientY);
+    return;
+  }
   shift = e.shiftKey;
   points.push({ x: Math.min(Math.max(0, e.clientX), window.innerWidth), y: Math.min(Math.max(0, e.clientY), window.innerHeight) });
+  if (pathLength(points) > 6 && (sel || hover)) {
+    hideAsk();
+    sel = null; loop = null; hover = null;
+    window.grab.send('overlay:selecting');
+  }
   render();
 });
 
@@ -329,18 +492,17 @@ window.addEventListener('mouseup', (e) => {
   if (!drawing || e.button !== 0) return;
   drawing = false;
   const len = pathLength(points);
+  window.grab.send('overlay:selecting');
   if (len < 6) {
-    finishSelection({ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, null);
+    const obj = refine(objectAt(e.clientX, e.clientY), e.clientX, e.clientY);
+    points = [];
+    finishSelection(obj.rect, null);
     return;
   }
   let r;
   let path = null;
-  if (shift || isStraight(points)) {
-    r = rectFrom(points[0], points[points.length - 1]);
-  } else {
-    path = smooth(points);
-    r = bbox(path);
-  }
+  if (shift || isStraight(points)) r = rectFrom(points[0], points[points.length - 1]);
+  else { path = smooth(points); r = bbox(path); }
   points = [];
   if (r.width < 10 || r.height < 10) { sel = null; render(); return; }
   finishSelection(r, path);
@@ -350,6 +512,7 @@ stage.addEventListener('contextmenu', (e) => e.preventDefault());
 
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { e.preventDefault(); cancel(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && !input.value) { e.preventDefault(); selectWholeScreen(); return; }
   if (!sel) return;
   if (e.key === 'Tab') {
     e.preventDefault();
@@ -377,7 +540,7 @@ window.grab.on('overlay:open', (data) => {
     resize();
     if (data.primary) {
       hint.classList.add('show');
-      hintTimer = setTimeout(fadeHint, 1500);
+      hintTimer = setTimeout(fadeHint, 2200);
     }
     window.grab.send('overlay:ready', data.displayId);
   };
@@ -385,8 +548,16 @@ window.grab.on('overlay:open', (data) => {
   next.src = data.image;
 });
 
+window.grab.on('overlay:objects', (list) => {
+  objWindows = Array.isArray(list) ? list : [];
+  if (pointer && !drawing) {
+    loadElements(windowAt(pointer.x, pointer.y));
+    updateHover(pointer.x, pointer.y);
+  }
+});
+
 window.grab.on('overlay:reset', reset);
-window.grab.on('overlay:clear-selection', () => { sel = null; loop = null; hideAsk(); render(); });
+window.grab.on('overlay:clear-selection', () => { sel = null; loop = null; hover = null; hideAsk(); render(); });
 
 accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || accent;
 resize();
