@@ -45,7 +45,13 @@ npm install
 npm start
 ```
 
-grab sits in the system tray and starts with Windows.
+grab sits in the system tray and starts with Windows. For a sturdier start, also run this once:
+
+```
+powershell -ExecutionPolicy Bypass -File scripts\install-startup.ps1
+```
+
+It adds a scheduled task that starts grab 20 seconds after you sign in and again whenever you unlock the PC, so grab comes back even if it was closed. If grab is already running, the extra launch does nothing. grab writes what happened at startup (including whether the shortcut was free) to `%APPDATA%\Grab\grab.log`.
 
 ### Connecting to Claude
 
