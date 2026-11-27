@@ -1,6 +1,6 @@
 const {
   app, BrowserWindow, globalShortcut, desktopCapturer, screen, ipcMain,
-  Tray, Menu, nativeImage, safeStorage, clipboard, dialog, nativeTheme, Notification, shell,
+  Tray, Menu, nativeImage, safeStorage, clipboard, dialog, nativeTheme, Notification, shell, powerMonitor,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -20,7 +20,20 @@ const SYSTEM_PROMPT = [
 const BRIEF_PROMPT = 'Summarize your previous answer in one or two short lines of plain text. No preamble, no lists, no headings.';
 const BRIEF_LABEL = 'Summary in 1-2 lines';
 
-if (!app.requestSingleInstanceLock()) app.quit();
+function logLine(msg) {
+  try {
+    const file = path.join(app.getPath('userData'), 'grab.log');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    try { if (fs.statSync(file).size > 512 * 1024) fs.renameSync(file, `${file}.old`); } catch { /* new file */ }
+    fs.appendFileSync(file, `${new Date().toISOString()} ${msg}\n`);
+  } catch { /* logging must never break the app */ }
+}
+process.on('uncaughtException', (err) => logLine(`uncaught: ${err?.stack || err}`));
+process.on('unhandledRejection', (err) => logLine(`unhandled rejection: ${err?.stack || err}`));
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+}
 
 const preload = path.join(__dirname, 'preload.js');
 const configPath = () => path.join(app.getPath('userData'), 'config.json');
@@ -98,6 +111,7 @@ function registerShortcut() {
   globalShortcut.unregisterAll();
   let ok = false;
   try { ok = globalShortcut.register(config.shortcut, startGrab); } catch { ok = false; }
+  logLine(`shortcut ${config.shortcut} ${ok ? 'registered' : 'FAILED (taken by another app)'}`);
   if (!ok) new Notification({ title: 'grab', body: `${prettyShortcut(config.shortcut)} is taken by another app. Pick another shortcut in the dashboard.` }).show();
   updateTray();
   return ok;
@@ -645,9 +659,17 @@ function registerIpc() {
   ipcMain.on('dash:minimize', () => dashWin?.minimize());
 }
 
-app.on('second-instance', startGrab);
+app.on('second-instance', (_e, argv) => {
+  if (argv.includes('--background')) return;
+  startGrab();
+});
 
 app.whenReady().then(() => {
+  logLine(`started pid=${process.pid} argv=${process.argv.slice(1).join(' ')}`);
+  powerMonitor.on('resume', () => { logLine('resumed from sleep'); registerShortcut(); });
+  powerMonitor.on('unlock-screen', () => { if (!globalShortcut.isRegistered(config.shortcut)) registerShortcut(); });
+  app.on('render-process-gone', (_ev, wc, details) => logLine(`renderer gone: ${details.reason} ${wc.getURL().split('/').pop()}`));
+  app.on('child-process-gone', (_ev, details) => logLine(`child gone: ${details.type} ${details.reason}`));
   if (process.platform === 'darwin') app.dock?.hide();
   app.setAppUserModelId('grab');
   loadConfig();
@@ -674,4 +696,4 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', (e) => e.preventDefault());
 app.on('before-quit', () => { app.isQuitting = true; dropWarm(); uia.stop(); });
-app.on('will-quit', () => globalShortcut.unregisterAll());
+app.on('will-quit', () => { logLine('quitting'); globalShortcut.unregisterAll(); });
